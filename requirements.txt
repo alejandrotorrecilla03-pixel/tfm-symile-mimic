@@ -1,0 +1,16 @@
+# Manipulación de datos y ML clásico
+numpy
+pandas
+scikit-learn
+xgboost
+
+# Deep Learning (PyTorch)
+torch
+torchvision
+torchaudio
+
+# Visualización y Notebooks
+matplotlib
+seaborn
+jupyter
+ipykernel

@@ -1,0 +1,24 @@
+# Entornos virtuales
+venv/
+env/
+
+# Caché de Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Jupyter Notebooks
+.ipynb_checkpoints/
+
+# Archivos de sistema y editores
+.vscode/
+.idea/
+.DS_Store
+
+# Datos pesados y modelos de Deep Learning
+/data/
+/modelos_guardados/
+*.pth
+*.pt
+*.h5
+*.log
