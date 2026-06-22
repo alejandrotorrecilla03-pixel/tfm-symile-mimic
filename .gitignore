@@ -22,3 +22,8 @@ __pycache__/
 *.pt
 *.h5
 *.log
+
+# Salidas de notebooks: pesadas y derivadas de MIMIC (predicciones con hadm_id, .npy cacheados) -> NO subir (tamaño + DUA)
+notebooks/outputs_*/
+notebooks/eda_outputs/
+*.npy
