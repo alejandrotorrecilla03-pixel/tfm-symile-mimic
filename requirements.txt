@@ -14,3 +14,8 @@ matplotlib
 seaborn
 jupyter
 ipykernel
+
+# App de apoyo a la decisión (interfaz gráfica) e informes
+streamlit
+plotly
+python-docx
