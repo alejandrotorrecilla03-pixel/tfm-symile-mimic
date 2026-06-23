@@ -1,0 +1,306 @@
+# -*- coding: utf-8 -*-
+# Generador de 03_LABS_Tabular_v3 (PESADO): base XGB+LGB+LogReg+MLP (+TabPFN nube opcional) -> OOF por modelo
+# -> STACKING de 2º nivel (meta-LogReg por etiqueta). Calibración + OOF. Horas en CPU (TabPFN por nube).
+import nbformat as nbf, io
+nb=nbf.v4.new_notebook(); C=[]
+md=lambda s:C.append(nbf.v4.new_markdown_cell(s)); co=lambda s:C.append(nbf.v4.new_code_cell(s))
+
+md(r"""# 🧪 Analíticas de sangre (tabular) — **v3 PESADO** (CPU · máximo nivel · modelo independiente)
+## TFM · Módulo Tabular (Laboratorio) · Universidad de Salamanca
+
+---
+
+## 🎯 Qué es esta versión (la más compleja de las 3)
+Exprime el techo de la señal tabular (~0.69 AUC) con un **stacking de 2º nivel**: varios modelos base diversos generan
+predicciones **out-of-fold**, y un **meta-modelo (LogReg)** aprende a combinarlas por etiqueta. Suele batir al promedio
+simple del v2 por unas milésimas.
+
+| Componente | Detalle |
+|---|---|
+| **Modelos base** | XGBoost, LightGBM (NaN nativo) + LogReg, MLP (percentil imputado) **+ TabPFN (nube, opcional)** |
+| **OOF por modelo** | K-fold con imputación/escalado **por fold** (sin fuga) |
+| **2º nivel (stacking)** | **meta-LogReg por etiqueta** sobre las probabilidades base; se compara con el promedio simple |
+| **Selección** | se queda con stacking o promedio según la **validación** |
+
+## ⏱️ Coste (CPU): el tuning de árboles + K-fold es ~1 h; **TabPFN va por nube** (necesita `TABPFN_TOKEN`). Pon
+`USE_TABPFN=False` para una corrida solo-local. Diseñado para **< 24 h**.
+
+## 🛡️ Bases del proyecto (intactas)
+Masking de NaN/−1 · **negativos derivados** · sin `cxr_view` · flags de missingness · `scale_pos_weight` · **calibración
+isotónica** · **OOF sin fuga** para el stacking multimodal · nombres legibles.
+""")
+
+co(r"""# CELDA 1 · DEPENDENCIAS
+import subprocess, sys
+try: import torch  # noqa
+except ImportError:
+    subprocess.run([sys.executable,"-m","pip","install","torch","--index-url","https://download.pytorch.org/whl/cpu","-q"],check=True)
+for p in ["xgboost","lightgbm","scikit-learn","pandas","numpy","matplotlib","seaborn"]:
+    subprocess.run([sys.executable,"-m","pip","install",p,"-q"],check=False)
+try: subprocess.run([sys.executable,"-m","pip","install","tabpfn-client","-q"],check=False)
+except Exception: pass
+print("Dependencias listas.")""")
+
+co(r"""# CELDA 2 · IMPORTS, RUTAS Y CONSTANTES
+import os, json, copy, warnings
+from pathlib import Path
+import numpy as np, pandas as pd, matplotlib.pyplot as plt, seaborn as sns
+import torch, torch.nn as nn, torch.nn.functional as F
+from sklearn.model_selection import KFold
+from sklearn.preprocessing import StandardScaler
+from sklearn.impute import SimpleImputer
+from sklearn.linear_model import LogisticRegression
+from sklearn.isotonic import IsotonicRegression
+from sklearn.metrics import roc_auc_score, average_precision_score, f1_score, confusion_matrix
+import xgboost as xgb, lightgbm as lgb
+warnings.filterwarnings("ignore"); SEED=42; np.random.seed(SEED); torch.manual_seed(SEED); torch.set_num_threads(4); DEVICE="cpu"
+try:
+    import tabpfn_client; from tabpfn_client import TabPFNClassifier
+    tok=os.environ.get("TABPFN_TOKEN")
+    if tok:
+        try: tabpfn_client.set_access_token(tok)
+        except Exception: pass
+    TABPFN_OK=True
+except Exception: TABPFN_OK=False
+
+BASE=Path(r"C:\TFM\1.Opción - Symile Mimic\symile-mimic-a-multimodal-clinical-dataset-of-chest-x-rays-electrocardiograms-and-blood-labs-from-mimic-iv-1.0.0")
+CSV=BASE/"data_csv"/"clean"; TRAIN_CSV,VAL_CSV,TEST_CSV=CSV/"train_clean.csv",CSV/"val_clean.csv",CSV/"test_clean.csv"
+OUTPUT_DIR=Path("outputs_labs_tabular_v3"); OUTPUT_DIR.mkdir(exist_ok=True); FIG=OUTPUT_DIR/"figuras"; FIG.mkdir(exist_ok=True)
+LABELS=["Atelectasis","Cardiomegaly","Edema","Lung Opacity","No Finding","Pleural Effusion"]
+N_LABELS=len(LABELS); NO_FINDING="No Finding"; PATHOLOGY=[l for l in LABELS if l!=NO_FINDING]; CORE=["Cardiomegaly","Edema","Pleural Effusion"]
+K_FOLDS=5; FLAG_THRESH=0.02; USE_TABPFN=TABPFN_OK; TABPFN_MAX=4000
+GENDER={0:0,1:1,"0":0,"1":1,"M":1,"F":0}; RACE={"UNKNOWN":0,"WHITE":1,"BLACK":2,"ASIAN":3,"HISPANIC_LATINO":4,"OTHER_KNOWN":0}
+ADM={"SCHEDULED":0,"EMERGENCY":1,"OBSERVATION":2,"URGENT":3}; LOC={"EMERGENCY_ROOM":0,"REFERRAL":1,"TRANSFER":2,"INTRA_HOSPITAL":3}
+print("Salidas en", OUTPUT_DIR, "· TabPFN disponible:", USE_TABPFN)""")
+
+co(r"""# CELDA 3 · CARGA + OBJETIVOS (masking + negativos derivados)
+df_train=pd.read_csv(TRAIN_CSV,sep=";"); df_val=pd.read_csv(VAL_CSV,sep=";"); df_test=pd.read_csv(TEST_CSV,sep=";")
+DEMO=["subject_id","hadm_id","cxr_path","ecg_path","age","gender","race","admission_type","admission_location","cxr_view","hours_adm_to_cxr"]
+RAW_LABS=[c for c in df_train.columns if c not in LABELS and c not in DEMO and "pctile" not in c]
+PCT_LABS=[c for c in df_train.columns if "pctile" in c]
+def build_targets(df, uncertainty_policy="zeros", derive=True, verbose=False):
+    raw=df[LABELS].to_numpy(dtype=float); N=raw.shape[0]
+    labels=np.zeros((N,N_LABELS),np.float32); mask=np.zeros((N,N_LABELS),np.float32)
+    mask[~np.isnan(raw)]=1.0; labels[raw==1]=1.0
+    unc=(raw==-1); labels[unc]=1.0 if uncertainty_policy=="ones" else 0.0
+    nf=LABELS.index(NO_FINDING); pc=[j for j in range(N_LABELS) if j!=nf]; ndp=ndn=0
+    if derive:
+        nfp=(raw[:,nf]==1)
+        for j in pc:
+            f=nfp&np.isnan(raw[:,j]); labels[f,j]=0.0; mask[f,j]=1.0; ndp+=int(f.sum())
+        ap=(raw[:,pc]==1).any(1); fn=ap&np.isnan(raw[:,nf]); labels[fn,nf]=0.0; mask[fn,nf]=1.0; ndn=int(fn.sum())
+    if verbose: print(f"   negativos derivados -> patologías={ndp:,} · No Finding={ndn:,}")
+    return labels,mask
+y_train,m_train=build_targets(df_train,verbose=True); y_val,m_val=build_targets(df_val); y_test,m_test=build_targets(df_test)""")
+
+co(r"""# CELDA 4 · FEATURES (tree: NaN nativo · dense: percentil) + ratios + flags + demografía
+train_miss=df_train[RAW_LABS].isna().mean(); FLAG_LABS=[c for c in RAW_LABS if train_miss[c]>FLAG_THRESH]
+def _col(key):
+    for c in RAW_LABS:
+        if c.startswith(key+"_") or c==key: return c
+    return None
+C_UREA=_col("urea_nitrogen"); C_CREAT=_col("creatinine"); C_NEUT=_col("neutrophils_pct"); C_LYMPH=_col("lymphocytes_pct"); C_RDW=_col("rdw")
+def ratios(df):
+    g=lambda c: df[c].to_numpy(np.float32) if c else np.full(len(df),np.nan,np.float32)
+    urea,creat,neut,lymph,rdw=g(C_UREA),g(C_CREAT),g(C_NEUT),g(C_LYMPH),g(C_RDW); age=df["age"].astype(float).to_numpy(np.float32)
+    return np.vstack([urea/(creat+1e-6),neut/(lymph+1e-6),rdw*age/100.0]).T.astype(np.float32)
+def demo(df):
+    n=len(df); cols=[df["age"].astype(float).to_numpy()[:,None], df["gender"].map(lambda v:float(GENDER.get(v,0))).to_numpy()[:,None]]
+    def oh(s,mp):
+        M=np.zeros((n,max(mp.values())+1),np.float32)
+        for i,v in enumerate(s): M[i,mp.get(str(v).upper(),0)]=1.0
+        return M
+    for c,mp in [("race",RACE),("admission_type",ADM),("admission_location",LOC)]: cols.append(oh(df[c],mp))
+    cols.append(df["hours_adm_to_cxr"].astype(float).to_numpy()[:,None]); return np.hstack(cols).astype(np.float32)
+def build_tree(df): return np.hstack([df[RAW_LABS].to_numpy(np.float32), ratios(df), df[FLAG_LABS].isna().astype(np.float32).to_numpy(), demo(df)])
+def build_dense(df): return np.hstack([df[PCT_LABS].to_numpy(np.float32), ratios(df), df[FLAG_LABS].isna().astype(np.float32).to_numpy(), demo(df)])
+TREE_tr,TREE_vl,TREE_te=build_tree(df_train),build_tree(df_val),build_tree(df_test)
+DENSE_tr,DENSE_vl,DENSE_te=build_dense(df_train),build_dense(df_val),build_dense(df_test)
+def dfit(idx): imp=SimpleImputer(strategy="median").fit(DENSE_tr[idx]); sc=StandardScaler().fit(imp.transform(DENSE_tr[idx])); return imp,sc
+def dtx(imp,sc,X): return sc.transform(imp.transform(X)).astype(np.float32)
+print(f"TREE={TREE_tr.shape} DENSE={DENSE_tr.shape} · {len(FLAG_LABS)} flags")""")
+
+co(r"""# CELDA 5 · MÉTRICAS, MLP tabular y modelos base
+def multilabel_metrics(probs,labels,mask,thresholds=None):
+    if thresholds is None: thresholds={l:0.5 for l in LABELS}
+    res={}
+    for j,l in enumerate(LABELS):
+        s=mask[:,j]==1; yt=labels[s,j]; yp=probs[s,j]; npos=int(yt.sum()); nneg=int((1-yt).sum())
+        pred=(yp>=thresholds.get(l,0.5)).astype(float)
+        auc=roc_auc_score(yt,yp) if npos>=2 and nneg>=2 else float("nan")
+        ap=average_precision_score(yt,yp) if npos>=2 and nneg>=2 else float("nan")
+        tp=int(((pred==1)&(yt==1)).sum()); tn=int(((pred==0)&(yt==0)).sum()); fp=int(((pred==1)&(yt==0)).sum()); fn=int(((pred==0)&(yt==1)).sum())
+        res[l]={"AUC":auc,"AP":ap,"F1":f1_score(yt,pred,zero_division=0),"sens":tp/max(tp+fn,1),"spec":tn/max(tn+fp,1),"n_pos":npos,"n_neg":nneg,"thr":thresholds.get(l,0.5)}
+    mac=lambda g:float(np.nanmean([res[l]["AUC"] for l in g])) if any(not np.isnan(res[l]["AUC"]) for l in g) else float("nan")
+    res["macro_AUC_core"]=mac(CORE); res["macro_AUC_path"]=mac(PATHOLOGY); return res
+def best_thresholds_by_f1(probs,labels,mask):
+    grid=np.linspace(0.05,0.95,37); thr={}
+    for j,l in enumerate(LABELS):
+        s=mask[:,j]==1; yt=labels[s,j]; yp=probs[s,j]
+        if yt.sum()<2: thr[l]=0.5; continue
+        bf,bt=-1,0.5
+        for t in grid:
+            f=f1_score(yt,(yp>=t).astype(float),zero_division=0)
+            if f>bf: bf,bt=f,t
+        thr[l]=float(bt)
+    return thr
+def ovr(make,Xtr,ytr,mtr,Xva,spw=True):
+    P=np.full((len(Xva),N_LABELS),0.5,np.float32)
+    for j in range(N_LABELS):
+        s=mtr[:,j]==1; Xj=Xtr[s]; yj=ytr[s,j]
+        if len(np.unique(yj))<2: P[:,j]=float(yj.mean()) if len(yj) else 0.5; continue
+        w=(yj==0).sum()/max((yj==1).sum(),1); clf=make(w if spw else None); clf.fit(Xj,yj); P[:,j]=clf.predict_proba(Xva)[:,1]
+    return P
+mk_xgb=lambda w: xgb.XGBClassifier(n_estimators=800,max_depth=5,learning_rate=0.03,subsample=0.8,colsample_bytree=0.8,min_child_weight=2,reg_lambda=1.5,tree_method="hist",eval_metric="logloss",n_jobs=4,random_state=SEED,scale_pos_weight=w)
+mk_lgb=lambda w: lgb.LGBMClassifier(n_estimators=800,num_leaves=63,learning_rate=0.03,subsample=0.8,colsample_bytree=0.8,min_child_samples=20,reg_lambda=1.5,n_jobs=4,random_state=SEED,verbosity=-1,scale_pos_weight=w)
+mk_lr=lambda w: LogisticRegression(max_iter=3000,class_weight="balanced",C=1.0,n_jobs=4)
+class TabMLP(nn.Module):
+    def __init__(s,d): super().__init__(); s.n=nn.Sequential(nn.Linear(d,256),nn.BatchNorm1d(256),nn.ReLU(),nn.Dropout(0.4),nn.Linear(256,128),nn.BatchNorm1d(128),nn.ReLU(),nn.Dropout(0.3),nn.Linear(128,N_LABELS))
+    def forward(s,x): return s.n(x)
+def pw_(y,m,clip=10.0):
+    w=np.ones(N_LABELS,np.float32)
+    for j in range(N_LABELS):
+        s=m[:,j]==1; pos=(y[s,j]==1).sum(); neg=(y[s,j]==0).sum(); w[j]=np.clip(neg/max(pos,1),1/clip,clip)
+    return torch.tensor(w)
+def train_mlp(Xtr,ytr,mtr,Xva,yva=None,mva=None,epochs=120,patience=12):
+    pw=pw_(ytr,mtr); mdl=TabMLP(Xtr.shape[1]); opt=torch.optim.AdamW(mdl.parameters(),lr=8e-4,weight_decay=1e-4)
+    Xt=torch.tensor(Xtr); Yt=torch.tensor(ytr); Mt=torch.tensor(mtr); n=len(Xt); best,bs,wait=-1,None,0
+    for ep in range(epochs):
+        mdl.train(); perm=torch.randperm(n)
+        for i in range(0,n,256):
+            idx=perm[i:i+256]
+            if len(idx)<2: continue
+            opt.zero_grad(); lo=mdl(Xt[idx]); bce=F.binary_cross_entropy_with_logits(lo,Yt[idx],pos_weight=pw,reduction="none")*Mt[idx]
+            (bce.sum()/Mt[idx].sum().clamp(min=1e-8)).backward(); opt.step()
+        if yva is not None:
+            mdl.eval()
+            with torch.no_grad(): pv=torch.sigmoid(mdl(torch.tensor(Xva))).numpy()
+            sc=multilabel_metrics(pv,yva,mva)["macro_AUC_path"]
+            if sc>best+1e-4: best,bs,wait=sc,copy.deepcopy(mdl.state_dict()),0
+            else:
+                wait+=1
+                if wait>=patience: break
+    if bs is not None: mdl.load_state_dict(bs)
+    mdl.eval()
+    with torch.no_grad(): return torch.sigmoid(mdl(torch.tensor(Xva))).numpy()
+BASE_MODELS=["XGBoost","LightGBM","LogReg","MLP"]+(["TabPFN"] if USE_TABPFN else [])
+print("Modelos base:", BASE_MODELS)""")
+
+co(r"""# CELDA 6 · K-FOLD -> OOF de CADA modelo base (sin fuga, imputación por fold)
+def base_predict(name, tr, va, imp, sc):
+    if name=="XGBoost":  return ovr(mk_xgb,TREE_tr[tr],y_train[tr],m_train[tr],TREE_tr[va])
+    if name=="LightGBM": return ovr(mk_lgb,TREE_tr[tr],y_train[tr],m_train[tr],TREE_tr[va])
+    if name=="LogReg":   return ovr(mk_lr,dtx(imp,sc,DENSE_tr[tr]),y_train[tr],m_train[tr],dtx(imp,sc,DENSE_tr[va]),spw=False)
+    if name=="MLP":      return train_mlp(dtx(imp,sc,DENSE_tr[tr]),y_train[tr],m_train[tr],dtx(imp,sc,DENSE_tr[va]),y_train[va],m_train[va])
+    if name=="TabPFN":
+        sub=tr if len(tr)<=TABPFN_MAX else np.random.RandomState(SEED).choice(tr,TABPFN_MAX,replace=False)
+        return ovr(lambda w: TabPFNClassifier(), dtx(imp,sc,DENSE_tr[sub]),y_train[sub],m_train[sub],dtx(imp,sc,DENSE_tr[va]),spw=False)
+oof={n:np.zeros((len(df_train),N_LABELS),np.float32) for n in BASE_MODELS}; kf=KFold(K_FOLDS,shuffle=True,random_state=SEED); failed=set()
+for k,(tr,va) in enumerate(kf.split(np.arange(len(df_train)))):
+    imp,sc=dfit(tr)
+    for n in BASE_MODELS:
+        if n in failed: continue
+        try: oof[n][va]=base_predict(n,tr,va,imp,sc)
+        except Exception as ex: print(f"   ⚠ {n} falla y se omite: {str(ex)[:80]}"); failed.add(n)
+    print(f"Fold {k+1}/{K_FOLDS} ok")
+MODELS=[n for n in BASE_MODELS if n not in failed]
+for n in MODELS: print(f"   OOF {n:9s} macroAUC_path={multilabel_metrics(oof[n],y_train,m_train)['macro_AUC_path']:.4f}")""")
+
+co(r"""# CELDA 7 · 2º NIVEL: meta-LogReg por etiqueta (stacking) vs promedio simple; elegir por validación
+imp_f,sc_f=dfit(np.arange(len(df_train)))
+def base_full(name, X_is_val):
+    Xd_eval=dtx(imp_f,sc_f, DENSE_vl if X_is_val else DENSE_te); TREE_eval=TREE_vl if X_is_val else TREE_te
+    if name=="XGBoost":  return ovr(mk_xgb,TREE_tr,y_train,m_train,TREE_eval)
+    if name=="LightGBM": return ovr(mk_lgb,TREE_tr,y_train,m_train,TREE_eval)
+    if name=="LogReg":   return ovr(mk_lr,dtx(imp_f,sc_f,DENSE_tr),y_train,m_train,Xd_eval,spw=False)
+    if name=="MLP":      return train_mlp(dtx(imp_f,sc_f,DENSE_tr),y_train,m_train,Xd_eval,y_val,m_val)
+    if name=="TabPFN":
+        sub=np.arange(len(df_train)) if len(df_train)<=TABPFN_MAX else np.random.RandomState(SEED).choice(len(df_train),TABPFN_MAX,replace=False)
+        return ovr(lambda w: TabPFNClassifier(), dtx(imp_f,sc_f,DENSE_tr[sub]),y_train[sub],m_train[sub],Xd_eval,spw=False)
+base_val={n:base_full(n,True) for n in MODELS}; base_test={n:base_full(n,False) for n in MODELS}
+def meta_stack(oof_dic, eval_dic):
+    # meta-LogReg por etiqueta: features = prob de cada modelo base para ESA etiqueta
+    P=np.full((len(next(iter(eval_dic.values()))),N_LABELS),0.5,np.float32)
+    for j in range(N_LABELS):
+        s=m_train[:,j]==1; yj=y_train[s,j]
+        if len(np.unique(yj))<2: continue
+        Xtr=np.column_stack([oof_dic[n][s,j] for n in MODELS]); Xev=np.column_stack([eval_dic[n][:,j] for n in MODELS])
+        P[:,j]=LogisticRegression(C=1.0,class_weight="balanced",max_iter=2000).fit(Xtr,yj).predict_proba(Xev)[:,1]
+    return P
+# OOF del meta por K-fold (sin fuga) para elegir honestamente
+oof_meta=np.zeros((len(df_train),N_LABELS),np.float32); kf2=KFold(K_FOLDS,shuffle=True,random_state=SEED)
+for tr,va in kf2.split(np.arange(len(df_train))):
+    for j in range(N_LABELS):
+        s=m_train[tr,j]==1; yj=y_train[tr][s,j]
+        if len(np.unique(yj))<2: continue
+        Xtr=np.column_stack([oof[n][tr][s,j] for n in MODELS]); Xev=np.column_stack([oof[n][va][:,j] for n in MODELS])
+        oof_meta[va,j]=LogisticRegression(C=1.0,class_weight="balanced",max_iter=2000).fit(Xtr,yj).predict_proba(Xev)[:,1]
+oof_avg=np.mean([oof[n] for n in MODELS],0)
+v_stack=multilabel_metrics(oof_meta,y_train,m_train)["macro_AUC_path"]; v_avg=multilabel_metrics(oof_avg,y_train,m_train)["macro_AUC_path"]
+USE_STACK = v_stack>=v_avg
+print(f"OOF stacking={v_stack:.4f} · promedio={v_avg:.4f} -> elijo {'STACKING' if USE_STACK else 'PROMEDIO'}")
+if USE_STACK:
+    oof_train=oof_meta; val_pred_raw=meta_stack(oof,base_val); test_pred_raw=meta_stack(oof,base_test)
+else:
+    oof_train=oof_avg; val_pred_raw=np.mean([base_val[n] for n in MODELS],0); test_pred_raw=np.mean([base_test[n] for n in MODELS],0)""")
+
+co(r"""# CELDA 8 · CALIBRACIÓN ISOTÓNICA (val) + umbrales por F1
+calibrators={}
+for j,l in enumerate(LABELS):
+    s=m_val[:,j]==1; yt=y_val[s,j]; yp=val_pred_raw[s,j]
+    calibrators[l]=None if len(np.unique(yt))<2 else IsotonicRegression(out_of_bounds="clip").fit(yp,yt)
+def apply_cal(P):
+    O=P.copy()
+    for j,l in enumerate(LABELS):
+        if calibrators[l] is not None: O[:,j]=calibrators[l].predict(P[:,j])
+    return O
+oof_cal=apply_cal(oof_train); val_pred=apply_cal(val_pred_raw); test_pred=apply_cal(test_pred_raw)
+thr_val=best_thresholds_by_f1(val_pred,y_val,m_val); print("Calibrado y umbrales listos.")""")
+
+co(r"""# CELDA 9 · EVALUACIÓN EN TEST + tabla + summary
+M=multilabel_metrics(test_pred,y_test,m_test,thresholds=thr_val); rows=[]
+print(f"{'Etiqueta':18s} {'AUC':>7} {'AP':>7} {'F1':>7} {'N+':>5} {'N-':>5}"); print("-"*54)
+for l in LABELS:
+    m=M[l]; auc=f"{m['AUC']:.4f}" if not np.isnan(m['AUC']) else "  N/A"
+    print(f"{l:18s} {auc:>7} {m['AP']:7.4f} {m['F1']:7.4f} {m['n_pos']:5d} {m['n_neg']:5d}")
+    rows.append({"label":l,**{k:m[k] for k in ['AUC','AP','F1','sens','spec','n_pos','n_neg']}})
+print("-"*54); print(f"MACRO core={M['macro_AUC_core']:.4f} · MACRO patol.={M['macro_AUC_path']:.4f}")
+pd.DataFrame(rows).to_csv(OUTPUT_DIR/"metrics_per_label_v3.csv",index=False)
+json.dump({"version":"LABS v3 pesado (base + stacking 2º nivel)","modelos":MODELS,"uso_stacking":bool(USE_STACK),
+           "test_macro_core":M["macro_AUC_core"],"test_macro_path":M["macro_AUC_path"],"test_per_label":{l:M[l] for l in LABELS}},
+          open(OUTPUT_DIR/"summary_v3.json","w",encoding="utf-8"),indent=2,default=str,ensure_ascii=False)
+print("Guardados metrics_per_label_v3.csv y summary_v3.json")""")
+
+co(r"""# CELDA 10 · MATRICES DE CONFUSIÓN + AUC por etiqueta
+fig,axes=plt.subplots(2,3,figsize=(13,8)); fig.suptitle("LABS v3 — Matrices de confusión (test)",fontweight="bold")
+for j,l in enumerate(LABELS):
+    ax=axes[j//3,j%3]; s=m_test[:,j]==1; yt=y_test[s,j]; yp=(test_pred[s,j]>=thr_val.get(l,0.5)).astype(int)
+    if len(yt)==0: ax.axis("off"); continue
+    sns.heatmap(confusion_matrix(yt,yp,labels=[0,1]),annot=True,fmt="d",cmap="Greens",cbar=False,ax=ax,xticklabels=["P0","P1"],yticklabels=["R0","R1"]); ax.set_title(l,fontsize=10)
+plt.tight_layout(); plt.savefig(FIG/"confusion_v3.png",dpi=150,bbox_inches="tight"); plt.show()
+fig2,ax=plt.subplots(figsize=(9,4.5)); aucs=[M[l]["AUC"] for l in LABELS]
+ax.bar(range(N_LABELS),[0 if np.isnan(a) else a for a in aucs],color=["#c0392b" if (np.isnan(a) or a<0.6) else "#117a65" for a in aucs],alpha=0.85)
+ax.axhline(0.5,color="gray",ls="--"); ax.set_xticks(range(N_LABELS)); ax.set_xticklabels([l[:11] for l in LABELS],rotation=30,ha="right")
+ax.set_ylim(0,1); ax.set_title("LABS v3 · AUC por etiqueta"); plt.tight_layout(); plt.savefig(FIG/"auc_v3.png",dpi=150,bbox_inches="tight"); plt.show()""")
+
+co(r"""# CELDA 11 · EXPORTAR OOF/val/test PARA EL STACKING (hadm_id, labs_<label>, labs_<label>_cal)
+def save_predictions(df, raw, cal, name):
+    cols={"hadm_id":df["hadm_id"].to_numpy()}
+    for j,l in enumerate(LABELS):
+        key=l.replace(" ","_"); cols[f"labs_{key}"]=raw[:,j]; cols[f"labs_{key}_cal"]=cal[:,j]
+    out=pd.DataFrame(cols); p=OUTPUT_DIR/f"labs_pred_{name}.csv"; out.to_csv(p,index=False); print("   guardado",p.name)
+save_predictions(df_train, oof_train, oof_cal, "oof_train")
+save_predictions(df_val, val_pred_raw, val_pred, "val")
+save_predictions(df_test, test_pred_raw, test_pred, "test")
+print("OOF/val/test del LABS v3 exportados.")""")
+
+md(r"""---
+## ✅ Resumen — LABS v3 (pesado)
+**Stacking de 2º nivel**: modelos base diversos (XGB, LGB, LogReg, MLP + TabPFN nube) generan OOF, y un **meta-LogReg por
+etiqueta** los combina; se compara con el promedio simple y se elige por validación. Mantiene masking, negativos
+derivados, calibración y **OOF sin fuga**. Si no supera al **v2 (0.692)**, confirma el techo de la señal tabular.""")
+
+nb["cells"]=C; nb.metadata["kernelspec"]={"display_name":"Python 3","language":"python","name":"python3"}
+nb.metadata["language_info"]={"name":"python","version":"3.10"}
+io.open("03_LABS_Tabular_v3.ipynb","w",encoding="utf-8").write(nbf.writes(nb))
+print("Generado 03_LABS_Tabular_v3.ipynb con",len(C),"celdas")

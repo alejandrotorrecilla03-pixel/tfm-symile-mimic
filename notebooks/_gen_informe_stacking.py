@@ -11,19 +11,19 @@ from docx.oxml import OxmlElement
 
 NBO=Path(r"C:\TFM\1.Opción - Symile Mimic\tfm_multimodal_clinico\notebooks")
 DOC=Path(r"C:\TFM\1.Opción - Symile Mimic\DOCUMENTACIÓN\Documentación Informe Stacking Multimodal.docx")
-V2F=NBO/"outputs_stacking_v2"/"figuras"; FAF=NBO/"outputs_fusion_avanzada"/"figuras"
+V2F=NBO/"outputs_stacking_v1"/"figuras"; FAF=NBO/"outputs_fusion_avanzada"/"figuras"
 
 BLUE=RGBColor(0x1F,0x4E,0x79); LBLUE=RGBColor(0x2E,0x75,0xB6); GREEN=RGBColor(0x37,0x56,0x23); GRAY=RGBColor(0x59,0x59,0x59)
 def jload(p): return json.load(open(p,encoding="utf-8"))
 def cload(p):
     with open(p,encoding="utf-8") as f: return list(csv.DictReader(f))
 sumf=jload(NBO/"outputs_fusion_avanzada"/"summary_fusion.json")
-v1=cload(NBO/"outputs_stacking"/"comparativa_enfoques.csv")
-v2=cload(NBO/"outputs_stacking_v2"/"comparativa_enfoques.csv")
+v1=cload(NBO/"outputs_stacking_v1"/"comparativa_enfoques.csv")
+v2=cload(NBO/"outputs_stacking_v1"/"comparativa_enfoques.csv")
 v3=cload(NBO/"outputs_fusion_avanzada"/"comparativa_fusion.csv")
-v4=cload(NBO/"outputs_stacking_v4"/"comparativa_fusion_v4.csv")
-sum4=jload(NBO/"outputs_stacking_v4"/"summary_v4.json")
-V4F=NBO/"outputs_stacking_v4"/"figuras"
+v4=cload(NBO/"outputs_stacking_v2"/"comparativa_fusion_v4.csv")
+sum4=jload(NBO/"outputs_stacking_v2"/"summary_v4.json")
+V4F=NBO/"outputs_stacking_v2"/"figuras"
 LABELS=["Atelectasis","Cardiomegaly","Edema","Lung Opacity","No Finding","Pleural Effusion"]
 
 doc=Document()

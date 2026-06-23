@@ -39,7 +39,7 @@ from sklearn.metrics import roc_auc_score
 warnings.filterwarnings("ignore"); np.random.seed(42)
 NB=Path.cwd(); BASE=Path(r"C:\TFM\1.Opción - Symile Mimic\symile-mimic-a-multimodal-clinical-dataset-of-chest-x-rays-electrocardiograms-and-blood-labs-from-mimic-iv-1.0.0")
 CSV=BASE/"data_csv"/"clean"
-DIRS={"CXR":(NB/"outputs_cxr_densenet121_v5","cxr"),"ECG":(NB/"outputs_ecg_resnet1d_v3_1","ecg"),"LABS":(NB/"outputs_labs_tabular_v2_2","labs")}
+DIRS={"CXR":(NB/"outputs_cxr_densenet121_v2","cxr"),"ECG":(NB/"outputs_ecg_resnet1d_v2","ecg"),"LABS":(NB/"outputs_labs_tabular_v2","labs")}
 OUT=NB/"outputs_herramienta_decision"; OUT.mkdir(exist_ok=True); (OUT/"figuras").mkdir(exist_ok=True)
 LABELS=["Atelectasis","Cardiomegaly","Edema","Lung Opacity","No Finding","Pleural Effusion"]; N=len(LABELS)
 ES={"Atelectasis":"Atelectasia","Cardiomegaly":"Cardiomegalia","Edema":"Edema","Lung Opacity":"Opacidad pulmonar","No Finding":"Sin hallazgos","Pleural Effusion":"Derrame pleural"}
