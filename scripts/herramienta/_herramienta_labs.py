@@ -6,6 +6,9 @@ MÉTODO (acordado con el usuario):
   2. Para cada hallazgo se toma su conjunto de analíticas CLÍNICAMENTE RELEVANTES
      (mapa FINDING_LABS, con justificación fisiológica por analítica).
   3. Se calcula el valor y su estado (bajo/normal/alto) frente al rango de referencia.
+     El rango se AJUSTA POR SEXO en las analíticas que lo requieren (hemoglobina,
+     hematocrito, creatinina); el resto usan rango de adulto sexo-neutro. La edad no
+     se ajusta: para estas analíticas los rangos de adulto son estables con la edad.
   4. Se ORDENAN priorizando las ANORMALES (mayor desviación fuera de rango primero) y
      se muestran hasta 6, indicando para qué hallazgo son relevantes.
 La edad/sexo NO son analíticas: van en la cabecera del paciente, no aquí.
@@ -18,7 +21,14 @@ data=json.load(open(f"{OUT}/data.json",encoding="utf-8"))
 pMap={p["hadm_id"]:p for p in data["pacientes"]}
 PATOLOGIAS=["Cardiomegalia","Edema","Derrame pleural","Atelectasia","Opacidad pulmonar","Sin hallazgo"]
 
-# catálogo: col -> (label, unidad, (lo,hi), por qué importa)
+# Rangos de referencia que SÍ dependen del sexo (adulto). El resto son sexo-neutros.
+# Fuente: intervalos de referencia estándar de laboratorio de adultos (manuales clínicos).
+SEXR={
+ "hemoglobin_51222":{"Masculino":(13.5,17.5),"Femenino":(12.0,15.5)},
+ "hematocrit_51221":{"Masculino":(40,52),"Femenino":(36,46)},
+ "creatinine_50912":{"Masculino":(0.7,1.3),"Femenino":(0.6,1.1)},
+}
+# catálogo: col -> (label, unidad, (lo,hi) por defecto, por qué importa)
 LAB={
  "hemoglobin_51222":("Hemoglobina","g/dL",(12,17),"La anemia (baja) reduce el transporte de oxígeno y agrava la disnea y la insuficiencia cardíaca."),
  "hematocrit_51221":("Hematocrito","%",(36,50),"Proporción de glóbulos rojos; acompaña a la hemoglobina en la anemia."),
@@ -53,13 +63,17 @@ for c in cur:
         for f in foci:
             for col in FINDING_LABS.get(f,[]):
                 if col not in cols: cols.append(col)
+        sexo=p.get("sexo","")
         items=[]
         for col in cols:
             if col in cl.columns and pd.notna(row[col]):
-                label,uni,(lo,hi),why=LAB[col]; v=round(float(row[col]),2)
+                label,uni,(dlo,dhi),why=LAB[col]; v=round(float(row[col]),2)
+                lo,hi=SEXR.get(col,{}).get(sexo,(dlo,dhi))   # rango ajustado por sexo si procede
+                aj=col in SEXR and sexo in SEXR[col]
                 rel=[f for f in foci if col in FINDING_LABS.get(f,[])]
                 items.append({"label":label,"valor":v,"unidad":uni,"estado":estado(v,lo,hi),
-                              "rango":f"{lo}–{hi}","por_que":why,"relevante_para":rel,"_d":desv(v,lo,hi)})
+                              "rango":f"{lo}–{hi}","rango_sexo":aj,"por_que":why,
+                              "relevante_para":rel,"_d":desv(v,lo,hi)})
         items.sort(key=lambda x:-x["_d"])           # anormales primero (más desviación)
         for it in items: it.pop("_d")
         labs=items[:6]
