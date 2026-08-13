@@ -52,34 +52,43 @@ FINDING_LABS={
 def estado(v,lo,hi): return "bajo" if v<lo else ("alto" if v>hi else "normal")
 def desv(v,lo,hi): return (lo-v)/(hi-lo) if v<lo else ((v-hi)/(hi-lo) if v>hi else 0.0)
 
+def compute(p,row):
+    if p is None or row is None: return []
+    foci=[es for es in PATOLOGIAS if es!="Sin hallazgo" and p["hallazgos"][es]["real"]==1]
+    if not foci: foci=[es for es in PATOLOGIAS if es!="Sin hallazgo" and p["hallazgos"][es]["decision"]["cribado"]=="positivo"]
+    cols=[]
+    for f in foci:
+        for col in FINDING_LABS.get(f,[]):
+            if col not in cols: cols.append(col)
+    sexo=p.get("sexo","")
+    items=[]
+    for col in cols:
+        if col in cl.columns and pd.notna(row[col]):
+            label,uni,(dlo,dhi),why=LAB[col]; v=round(float(row[col]),2)
+            lo,hi=SEXR.get(col,{}).get(sexo,(dlo,dhi))   # rango ajustado por sexo si procede
+            aj=col in SEXR and sexo in SEXR[col]
+            rel=[f for f in foci if col in FINDING_LABS.get(f,[])]
+            items.append({"label":label,"valor":v,"unidad":uni,"estado":estado(v,lo,hi),
+                          "rango":f"{lo}–{hi}","rango_sexo":aj,"por_que":why,
+                          "relevante_para":rel,"_d":desv(v,lo,hi)})
+    items.sort(key=lambda x:-x["_d"])               # anormales primero (más desviación)
+    for it in items: it.pop("_d")
+    return items[:6]
+
+# TODOS los pacientes -> data.json (para que la Explicabilidad tenga analíticas en los 464)
+n=0
+for p in data["pacientes"]:
+    hid=p["hadm_id"]; row=cl.loc[hid] if hid in cl.index else None
+    p["analiticas_clave"]=compute(p,row); n+=1
+json.dump(data,open(f"{OUT}/data.json","w",encoding="utf-8"),ensure_ascii=False)
+shutil.copy(f"{OUT}/data.json","../herramienta/public/data.json")
+
+# curados.json (retrocompat: copia las analíticas ya calculadas)
 cur=json.load(open(f"{OUT}/curados.json",encoding="utf-8"))
-for c in cur:
-    hid=c["hadm_id"]; p=pMap.get(hid); row=cl.loc[hid] if hid in cl.index else None
-    labs=[]
-    if p is not None and row is not None:
-        foci=[es for es in PATOLOGIAS if es!="Sin hallazgo" and p["hallazgos"][es]["real"]==1]
-        if not foci: foci=[es for es in PATOLOGIAS if es!="Sin hallazgo" and p["hallazgos"][es]["decision"]["cribado"]=="positivo"]
-        cols=[]
-        for f in foci:
-            for col in FINDING_LABS.get(f,[]):
-                if col not in cols: cols.append(col)
-        sexo=p.get("sexo","")
-        items=[]
-        for col in cols:
-            if col in cl.columns and pd.notna(row[col]):
-                label,uni,(dlo,dhi),why=LAB[col]; v=round(float(row[col]),2)
-                lo,hi=SEXR.get(col,{}).get(sexo,(dlo,dhi))   # rango ajustado por sexo si procede
-                aj=col in SEXR and sexo in SEXR[col]
-                rel=[f for f in foci if col in FINDING_LABS.get(f,[])]
-                items.append({"label":label,"valor":v,"unidad":uni,"estado":estado(v,lo,hi),
-                              "rango":f"{lo}–{hi}","rango_sexo":aj,"por_que":why,
-                              "relevante_para":rel,"_d":desv(v,lo,hi)})
-        items.sort(key=lambda x:-x["_d"])           # anormales primero (más desviación)
-        for it in items: it.pop("_d")
-        labs=items[:6]
-    c["analiticas_clave"]=labs
+for c in cur: c["analiticas_clave"]=pMap[c["hadm_id"]].get("analiticas_clave",[])
 json.dump(cur,open(f"{OUT}/curados.json","w",encoding="utf-8"),ensure_ascii=False,indent=1)
 shutil.copy(f"{OUT}/curados.json","../herramienta/public/curados.json")
+print(f"OK · analíticas para {n} pacientes en data.json + {len(cur)} curados")
 print("OK · analíticas por relevancia+anormalidad. Ejemplo (primer curado):")
 for L in cur[0]["analiticas_clave"]:
     print(f"  {L['label']:12s} {L['valor']} {L['unidad']:6s} [{L['estado']}]  rel:{','.join(L['relevante_para'])}")
