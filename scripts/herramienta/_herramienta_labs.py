@@ -1,0 +1,71 @@
+"""Selección de ANALÍTICAS CLAVE por paciente — método documentado.
+
+MÉTODO (acordado con el usuario):
+  1. Se identifican los hallazgos CONFIRMADOS por el radiólogo (real==1). Si no hay
+     ninguno, se usan los que el sistema marca positivos en cribado.
+  2. Para cada hallazgo se toma su conjunto de analíticas CLÍNICAMENTE RELEVANTES
+     (mapa FINDING_LABS, con justificación fisiológica por analítica).
+  3. Se calcula el valor y su estado (bajo/normal/alto) frente al rango de referencia.
+  4. Se ORDENAN priorizando las ANORMALES (mayor desviación fuera de rango primero) y
+     se muestran hasta 6, indicando para qué hallazgo son relevantes.
+La edad/sexo NO son analíticas: van en la cabecera del paciente, no aquí.
+Salida: curados.json['analiticas_clave'] = [{label,valor,unidad,estado,rango,por_que,relevante_para}]
+"""
+import pandas as pd, json, shutil
+S="salidas"; OUT=f"{S}/_herramienta"
+cl=pd.read_csv("data/clean/test_clean.csv",sep=";").set_index("hadm_id")
+data=json.load(open(f"{OUT}/data.json",encoding="utf-8"))
+pMap={p["hadm_id"]:p for p in data["pacientes"]}
+PATOLOGIAS=["Cardiomegalia","Edema","Derrame pleural","Atelectasia","Opacidad pulmonar","Sin hallazgo"]
+
+# catálogo: col -> (label, unidad, (lo,hi), por qué importa)
+LAB={
+ "hemoglobin_51222":("Hemoglobina","g/dL",(12,17),"La anemia (baja) reduce el transporte de oxígeno y agrava la disnea y la insuficiencia cardíaca."),
+ "hematocrit_51221":("Hematocrito","%",(36,50),"Proporción de glóbulos rojos; acompaña a la hemoglobina en la anemia."),
+ "urea_nitrogen_51006":("Urea (BUN)","mg/dL",(7,20),"Se eleva en la congestión del síndrome cardiorrenal; marcador de sobrecarga de líquidos."),
+ "creatinine_50912":("Creatinina","mg/dL",(0.6,1.3),"Función renal; su deterioro se asocia a retención de líquidos (edema, congestión)."),
+ "sodium_50983":("Sodio","mmol/L",(135,145),"La hiponatremia aparece en la insuficiencia cardíaca avanzada por retención de agua."),
+ "albumin_50862":("Albúmina","g/dL",(3.5,5.0),"La hipoalbuminemia baja la presión oncótica y favorece el edema y el derrame (trasudado)."),
+ "wbc_count_51301":("Leucocitos","10⁹/L",(4.5,11),"La leucocitosis sugiere infección/inflamación (p. ej. neumonía detrás de una opacidad)."),
+ "neutrophils_pct_51256":("Neutrófilos","%",(40,70),"Su elevación acompaña a las infecciones bacterianas (relevante en opacidad/neumonía)."),
+ "lactate_50813":("Lactato","mmol/L",(0.5,2.2),"Sube en la hipoperfusión y la sepsis; señala gravedad en cuadros infecciosos."),
+ "potassium_50971":("Potasio","mmol/L",(3.5,5.1),"Sus alteraciones favorecen arritmias (se reflejan en el ECG); frecuente con diuréticos."),
+}
+FINDING_LABS={
+ "Cardiomegalia":["urea_nitrogen_51006","creatinine_50912","sodium_50983","hemoglobin_51222","potassium_50971"],
+ "Edema":["urea_nitrogen_51006","creatinine_50912","sodium_50983","albumin_50862","hemoglobin_51222"],
+ "Derrame pleural":["albumin_50862","urea_nitrogen_51006","creatinine_50912","hemoglobin_51222"],
+ "Opacidad pulmonar":["wbc_count_51301","neutrophils_pct_51256","lactate_50813"],
+ "Atelectasia":["wbc_count_51301","hemoglobin_51222"],
+ "Sin hallazgo":[],
+}
+def estado(v,lo,hi): return "bajo" if v<lo else ("alto" if v>hi else "normal")
+def desv(v,lo,hi): return (lo-v)/(hi-lo) if v<lo else ((v-hi)/(hi-lo) if v>hi else 0.0)
+
+cur=json.load(open(f"{OUT}/curados.json",encoding="utf-8"))
+for c in cur:
+    hid=c["hadm_id"]; p=pMap.get(hid); row=cl.loc[hid] if hid in cl.index else None
+    labs=[]
+    if p is not None and row is not None:
+        foci=[es for es in PATOLOGIAS if es!="Sin hallazgo" and p["hallazgos"][es]["real"]==1]
+        if not foci: foci=[es for es in PATOLOGIAS if es!="Sin hallazgo" and p["hallazgos"][es]["decision"]["cribado"]=="positivo"]
+        cols=[]
+        for f in foci:
+            for col in FINDING_LABS.get(f,[]):
+                if col not in cols: cols.append(col)
+        items=[]
+        for col in cols:
+            if col in cl.columns and pd.notna(row[col]):
+                label,uni,(lo,hi),why=LAB[col]; v=round(float(row[col]),2)
+                rel=[f for f in foci if col in FINDING_LABS.get(f,[])]
+                items.append({"label":label,"valor":v,"unidad":uni,"estado":estado(v,lo,hi),
+                              "rango":f"{lo}–{hi}","por_que":why,"relevante_para":rel,"_d":desv(v,lo,hi)})
+        items.sort(key=lambda x:-x["_d"])           # anormales primero (más desviación)
+        for it in items: it.pop("_d")
+        labs=items[:6]
+    c["analiticas_clave"]=labs
+json.dump(cur,open(f"{OUT}/curados.json","w",encoding="utf-8"),ensure_ascii=False,indent=1)
+shutil.copy(f"{OUT}/curados.json","../herramienta/public/curados.json")
+print("OK · analíticas por relevancia+anormalidad. Ejemplo (primer curado):")
+for L in cur[0]["analiticas_clave"]:
+    print(f"  {L['label']:12s} {L['valor']} {L['unidad']:6s} [{L['estado']}]  rel:{','.join(L['relevante_para'])}")
