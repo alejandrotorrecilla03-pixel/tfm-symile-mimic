@@ -14,6 +14,16 @@ __pycache__/
 .vscode/
 .idea/
 .DS_Store
+.claude/
+~$*            # ficheros de bloqueo temporales de Word
+
+# Logs de ejecución (derivados)
+logs/
+logs_*.txt
+
+# Dependencias de Node (por si se integra la app o los builders)
+node_modules/
+dist/
 
 # Datos pesados y modelos de Deep Learning
 /data/
@@ -26,4 +36,5 @@ __pycache__/
 # Salidas de notebooks: pesadas y derivadas de MIMIC (predicciones con hadm_id, .npy cacheados) -> NO subir (tamaño + DUA)
 notebooks/outputs_*/
 notebooks/eda_outputs/
+/salidas/
 *.npy
