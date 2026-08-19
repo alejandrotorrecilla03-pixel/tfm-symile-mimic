@@ -75,11 +75,29 @@ def compute(p,row):
     for it in items: it.pop("_d")
     return items[:6]
 
+# TODAS las analíticas del catálogo que tiene el paciente (para «Sin hallazgo» y «ver todas»).
+def compute_all(p,row):
+    if p is None or row is None: return []
+    sexo=p.get("sexo","")
+    items=[]
+    for col,(label,uni,(dlo,dhi),why) in LAB.items():
+        if col in cl.columns and pd.notna(row[col]):
+            v=round(float(row[col]),2)
+            lo,hi=SEXR.get(col,{}).get(sexo,(dlo,dhi))
+            aj=col in SEXR and sexo in SEXR[col]
+            rel=[f for f in PATOLOGIAS if f!="Sin hallazgo" and col in FINDING_LABS.get(f,[])]
+            items.append({"label":label,"valor":v,"unidad":uni,"estado":estado(v,lo,hi),
+                          "rango":f"{lo}–{hi}","rango_sexo":aj,"por_que":why,
+                          "relevante_para":rel,"_d":desv(v,lo,hi)})
+    items.sort(key=lambda x:-x["_d"])
+    for it in items: it.pop("_d")
+    return items
+
 # TODOS los pacientes -> data.json (para que la Explicabilidad tenga analíticas en los 464)
 n=0
 for p in data["pacientes"]:
     hid=p["hadm_id"]; row=cl.loc[hid] if hid in cl.index else None
-    p["analiticas_clave"]=compute(p,row); n+=1
+    p["analiticas_clave"]=compute(p,row); p["analiticas_todas"]=compute_all(p,row); n+=1
 json.dump(data,open(f"{OUT}/data.json","w",encoding="utf-8"),ensure_ascii=False)
 shutil.copy(f"{OUT}/data.json","../herramienta/public/data.json")
 
