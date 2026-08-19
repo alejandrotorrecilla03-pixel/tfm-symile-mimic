@@ -42,9 +42,10 @@ if c: add(c[0]["hadm_id"],"Edema (el ECG aporta por el nexo cardíaco)","Edema")
 # Falso negativo honesto: real positivo pero fusión baja
 c=[p for p in P if real(p,"Pleural Effusion")==1 and prob(p,"Pleural Effusion")<0.3]
 if c: add(c[0]["hadm_id"],"Falso negativo honesto (el sistema no lo detecta)","Pleural Effusion")
-# Opacidad (baja fiabilidad, con aviso)
-c=sorted([p for p in P if real(p,"Lung Opacity")==1],key=lambda p:-prob(p,"Lung Opacity"))
-if c: add(c[0]["hadm_id"],"Opacidad pulmonar (fiabilidad baja, con aviso)","Lung Opacity")
+# Opacidad (baja fiabilidad): caso LIMPIO cribado sí / confirmación no y exclusivo (23561270)
+c=[p for p in P if p["hadm_id"]==23561270]
+if not c: c=sorted([p for p in P if real(p,"Lung Opacity")==1],key=lambda p:-prob(p,"Lung Opacity"))
+if c: add(c[0]["hadm_id"],"Opacidad pulmonar (fiabilidad baja: cribado sí, confirmación no)","Lung Opacity")
 # Sano (Sin hallazgo alto): chequeo de coherencia
 c=sorted([p for p in P if real(p,"No Finding")==1],key=lambda p:-prob(p,"No Finding"))
 if c: add(c[0]["hadm_id"],"Paciente sin hallazgos (chequeo de coherencia)","Pleural Effusion")
@@ -115,4 +116,11 @@ for hid,motivo,foco in sel:
     print(f"  ✓ {hid} · {motivo} · assets={list(assets)}")
 
 json.dump(curados,open(f"{OUT}/curados.json","w",encoding="utf-8"),ensure_ascii=False,indent=1)
-print(f"\nOK · {len(curados)} curados · assets en {AST}")
+# copiar todos los assets (rx/ecg/gradcam) a la carpeta public de la app
+import shutil
+PUB="../herramienta/public/assets"
+os.makedirs(PUB,exist_ok=True)
+for f in os.listdir(AST):
+    if f.endswith(".png"): shutil.copy(f"{AST}/{f}",f"{PUB}/{f}")
+shutil.copy(f"{OUT}/curados.json","../herramienta/public/curados.json")
+print(f"\nOK · {len(curados)} curados · assets en {AST} + copiados a public/")
