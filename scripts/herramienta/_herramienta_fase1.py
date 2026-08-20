@@ -52,9 +52,10 @@ if c: add(c[0]["hadm_id"],"Paciente sin hallazgos (chequeo de coherencia)","Pleu
 # Atelectasia positiva
 c=sorted([p for p in P if real(p,"Atelectasis")==1],key=lambda p:-prob(p,"Atelectasis"))
 if c: add(c[0]["hadm_id"],"Atelectasia","Atelectasis")
-# Multi-hallazgo complejo
-c=sorted(P,key=lambda p:-sum(1 for l in LAB[:-1] if real(p,l)==1))
-if c: add(c[0]["hadm_id"],"Caso complejo con varios hallazgos","Cardiomegaly")
+# Dos hallazgos confirmados, acierto en AMBOS modos (didáctico, exclusivo)
+c=[p for p in P if p["hadm_id"]==27617935]
+if not c: c=sorted(P,key=lambda p:-sum(1 for l in LAB[:-1] if real(p,l)==1))
+if c: add(c[0]["hadm_id"],"Dos hallazgos (derrame + atelectasia): acierto en ambos modos","Pleural Effusion")
 print(f"Seleccionados {len(sel)} pacientes curados")
 
 # ── modelo Grad-CAM (CheXNet) ──

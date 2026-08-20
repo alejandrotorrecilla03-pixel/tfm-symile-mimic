@@ -42,11 +42,11 @@ LAB={
  "potassium_50971":("Potasio","mmol/L",(3.5,5.1),"Sus alteraciones favorecen arritmias (se reflejan en el ECG); frecuente con diuréticos."),
 }
 FINDING_LABS={
- "Cardiomegalia":["urea_nitrogen_51006","creatinine_50912","sodium_50983","hemoglobin_51222","potassium_50971"],
- "Edema":["urea_nitrogen_51006","creatinine_50912","sodium_50983","albumin_50862","hemoglobin_51222"],
- "Derrame pleural":["albumin_50862","urea_nitrogen_51006","creatinine_50912","hemoglobin_51222"],
+ "Cardiomegalia":["urea_nitrogen_51006","creatinine_50912","sodium_50983","hemoglobin_51222","hematocrit_51221","potassium_50971"],
+ "Edema":["urea_nitrogen_51006","creatinine_50912","sodium_50983","albumin_50862","hemoglobin_51222","hematocrit_51221"],
+ "Derrame pleural":["albumin_50862","urea_nitrogen_51006","creatinine_50912","hemoglobin_51222","hematocrit_51221"],
  "Opacidad pulmonar":["wbc_count_51301","neutrophils_pct_51256","lactate_50813"],
- "Atelectasia":["wbc_count_51301","hemoglobin_51222"],
+ "Atelectasia":["wbc_count_51301","hemoglobin_51222","hematocrit_51221"],
  "Sin hallazgo":[],
 }
 def estado(v,lo,hi): return "bajo" if v<lo else ("alto" if v>hi else "normal")
