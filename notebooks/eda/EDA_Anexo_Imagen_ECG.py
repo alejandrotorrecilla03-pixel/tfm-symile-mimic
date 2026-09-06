@@ -31,17 +31,17 @@ FIGD.mkdir(parents=True, exist_ok=True); TABD.mkdir(parents=True, exist_ok=True)
 
 # ───────── SISTEMA VISUAL (idéntico al EDA principal) ─────────
 INK, ACCENT, GRID, SUB = "#1F2A44", "#2E5496", "#D9DEE8", "#5A6678"
-POSC, NEGC = "#2E5496", "#C44E52"
+POSC, NEGC = "#2E5496", "#C55A11"
 sns.set_theme(style="white")
 mpl.rcParams.update({
-    "figure.dpi":120,"savefig.dpi":160,"savefig.bbox":"tight","font.family":"DejaVu Sans","font.size":12,
+    "figure.dpi":120,"savefig.dpi":160,"savefig.bbox":"tight","font.family":"Cambria","font.size":12,
     "axes.titlesize":15,"axes.titleweight":"bold","axes.titlecolor":INK,"axes.labelsize":12,"axes.labelcolor":INK,
     "axes.edgecolor":"#7A8499","axes.linewidth":1.0,"xtick.color":INK,"ytick.color":INK,"text.color":INK,
     "legend.fontsize":10,"legend.frameon":True,"legend.edgecolor":GRID,"legend.framealpha":0.95,
     "axes.grid":True,"grid.color":GRID,"grid.linewidth":0.8,"axes.axisbelow":True})
 LABELS=["Atelectasis","Cardiomegaly","Edema","Lung Opacity","No Finding","Pleural Effusion"]
 ES={"Atelectasis":"Atelectasia","Cardiomegaly":"Cardiomegalia","Edema":"Edema","Lung Opacity":"Opacidad pulmonar","No Finding":"Sin hallazgo","Pleural Effusion":"Derrame pleural"}
-LCOL={"Atelectasis":"#4C72B0","Cardiomegaly":"#DD8452","Edema":"#55A868","Lung Opacity":"#C44E52","No Finding":"#8C8C8C","Pleural Effusion":"#937DB8"}
+LCOL={"Atelectasis":"#1F3864","Cardiomegaly":"#2E5496","Edema":"#5B8FCB","Lung Opacity":"#C55A11","No Finding":"#7F7F7F","Pleural Effusion":"#2E8B57"}
 
 def style(ax,title=None,sub=None,xlabel=None,ylabel=None,grid=True):
     if title: ax.set_title(title,pad=16 if sub else 10)
@@ -95,7 +95,7 @@ centers=(BINS[:-1]+BINS[1:])/2
 
 # A1 · Histograma de intensidad por canal (confirma normalización ImageNet)
 fig,ax=plt.subplots(figsize=(8.4,4.8))
-for c,col,nm in zip(range(3),["#C44E52","#55A868","#4C72B0"],["Canal R","Canal G","Canal B"]):
+for c,col,nm in zip(range(3),["#C0392B","#27AE60","#2E5496"],["Canal R","Canal G","Canal B"]):
     ax.plot(centers,hist_ch[c]/hist_ch[c].sum(),lw=2,color=col,label=f"{nm} (μ={ch_stats[c,0]:+.2f})")
 ax.axvline(0,color="#7A8499",ls="--",lw=1)
 style(ax,"Distribución de intensidad del CXR por canal",
@@ -117,7 +117,7 @@ savefig(fig,"cxr_media_por_imagen")
 thr = 0.15  # std normalizado por debajo del cual la imagen apenas tiene contraste
 degen = int((img_std<thr).sum()); pct_degen=100*degen/len(idx_c)
 fig,ax=plt.subplots(figsize=(8,4.6))
-ax.hist(img_std,bins=40,color="#55A868",edgecolor="white")
+ax.hist(img_std,bins=40,color="#2E8B57",edgecolor="white")
 ax.axvline(thr,color=NEGC,ls="--",lw=1.4,label=f"umbral degenerado={thr}")
 style(ax,"Contraste por imagen (desviación típica de píxel)",
       f"Imágenes casi sin contraste: {degen}/{len(idx_c)} ({pct_degen:.1f}%) → posible .npy corrupto",
@@ -174,7 +174,7 @@ amp_sample=[np.concatenate(a[:200]) for a in lead_amp]
 # B1 · Amplitud por derivación (boxplot 12 derivaciones)
 fig,ax=plt.subplots(figsize=(10.5,4.8))
 bp=ax.boxplot(amp_sample,patch_artist=True,showfliers=False,widths=0.6,medianprops={"color":INK,"lw":1.6})
-for box in bp["boxes"]: box.set_facecolor("#A9C0E0")
+for box in bp["boxes"]: box.set_facecolor("#9FBCE0")
 ax.set_xticks(range(1,13)); ax.set_xticklabels(LEADS)
 style(ax,"Amplitud de señal por derivación ECG (muestra)","Valores normalizados a [−1, 1] · derivaciones precordiales (V) más amplias",xlabel="derivación",ylabel="amplitud normalizada")
 savefig(fig,"ecg_amplitud_derivacion")
@@ -231,7 +231,7 @@ if len(il_pos) and len(il_nf):
     ep=np.asarray(ecg[int(il_pos[0]),0,:, 1]).astype(np.float32); en=np.asarray(ecg[int(il_nf[0]),0,:, 1]).astype(np.float32)
     fig,axes=plt.subplots(2,1,figsize=(11,5),sharex=True,sharey=True)
     axes[0].plot(t,ep,lw=0.7,color=POSC); axes[0].set_title("Derrame pleural (positivo)",loc="left",fontsize=11,color=POSC)
-    axes[1].plot(t,en,lw=0.7,color="#8C8C8C"); axes[1].set_title("Sin hallazgo",loc="left",fontsize=11,color=SUB)
+    axes[1].plot(t,en,lw=0.7,color="#7F7F7F"); axes[1].set_title("Sin hallazgo",loc="left",fontsize=11,color=SUB)
     for ax in axes:
         ax.grid(True,color=GRID,lw=0.5); ax.tick_params(length=0)
         for s in ("top","right"): ax.spines[s].set_visible(False)

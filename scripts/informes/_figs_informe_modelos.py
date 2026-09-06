@@ -11,11 +11,16 @@ from sklearn.metrics import roc_curve, precision_recall_curve, average_precision
 
 FIG = "salidas/_informe_modelos/figuras"; os.makedirs(FIG, exist_ok=True)
 BLUE="#1F3864"; BLUE2="#2E5496"; ORANGE="#C55A11"; GREY="#595959"
-plt.rcParams.update({"font.family":"DejaVu Sans","font.size":10,"axes.edgecolor":"#888",
+plt.rcParams.update({"font.family":"Cambria","font.size":10,"axes.edgecolor":"#888",
                      "axes.titlecolor":BLUE,"figure.dpi":150})
 ES = {"Atelectasis":"Atelectasia","Cardiomegaly":"Cardiomegalia","Edema":"Edema",
       "Lung Opacity":"Opacidad pulmonar","No Finding":"Sin hallazgo","Pleural Effusion":"Derrame pleural"}
 LAB=list(ES.keys()); LAB_U=[l.replace(" ","_") for l in LAB]
+def nf_last(df):
+    # "No Finding" / "Sin hallazgo" siempre como ultima fila (convencion del TFM)
+    key="label" if "label" in df.columns else df.columns[0]
+    mask=df[key].isin(["No Finding","Sin hallazgo"])
+    return pd.concat([df[~mask],df[mask]]).reset_index(drop=True)
 PAL=["#1F3864","#2E5496","#5B8FCB","#C55A11","#7F7F7F","#2E8B57"]
 
 # ── datos: predicciones calibradas CXR v2 + etiquetas FINAL ──
@@ -43,17 +48,17 @@ fig.suptitle("CXR v2 — rendimiento por patología (test)",color=BLUE,fontweigh
 fig.tight_layout(rect=[0,0,1,0.96]); fig.savefig(f"{FIG}/01_cxr_v2_roc_pr.png",bbox_inches="tight"); plt.close(fig)
 
 # ── FIG 2 · barras AUC-PR y AUC-ROC por patología (CXR v2) ──
-m=pd.read_csv("salidas/01_cxr/v2/metrics_per_label_v2.csv")
+m=nf_last(pd.read_csv("salidas/01_cxr/v2/metrics_per_label_v2.csv"))
 labs=[ES.get(l,l) for l in m["label"]]; y=np.arange(len(labs))
 fig,ax=plt.subplots(figsize=(8.2,4.2))
 ax.barh(y-0.2,m["AP"],0.4,color=BLUE,label="AUC-PR")
 ax.barh(y+0.2,m["AUC"],0.4,color=BLUE2,label="AUC-ROC")
 for i,(ap,pv) in enumerate(zip(m["AP"],m["prevalencia"])):
-    ax.plot([pv,pv],[i-0.4,i+0.4],color=ORANGE,lw=2.4,
-            label=("Prevalencia (línea base de la AUC-PR)" if i==0 else None))
+    ax.plot([pv,pv],[i-0.4,i],color=ORANGE,lw=2.6,
+            label=("Prevalencia (línea base solo de la AUC-PR)" if i==0 else None))
 ax.set_yticks(y); ax.set_yticklabels(labs); ax.invert_yaxis(); ax.set_xlim(0,1)
 ax.set_xlabel("Valor"); ax.legend(loc="lower right",fontsize=8)
-ax.set_title("CXR v2 — AUC-PR y AUC-ROC por patología (naranja = prevalencia, línea base de la AP)")
+ax.set_title("CXR v2 — AUC-PR y AUC-ROC por patología (naranja = prevalencia, línea base solo de la AUC-PR)")
 ax.grid(axis="x",alpha=.25); fig.tight_layout(); fig.savefig(f"{FIG}/02_cxr_v2_auc_etiqueta.png",bbox_inches="tight"); plt.close(fig)
 
 # ── FIG 3 · EJE DOMINANTE: Edad y RDW×Edad ──
@@ -85,13 +90,18 @@ mono=vals["CXR en solitario"]
 items=sorted(((k,v) for k,v in vals.items() if k!="CXR en solitario"),key=lambda x:x[1])
 names=[k for k,_ in items]; vv=[v for _,v in items]
 best="Selección por patología"; interp="Pesos fijos interpretables"
-cols=[ORANGE if n==best else (BLUE2 if n==interp else BLUE) for n in names]
-fig,ax=plt.subplots(figsize=(8.6,5.2))
-ax.barh(names,vv,color=cols)
+cols=[ORANGE if n==best else ("#5B8FCB" if n==interp else BLUE) for n in names]
+fig,ax=plt.subplots(figsize=(8.8,5.4))
+bars=ax.barh(names,vv,color=cols)
 ax.axvline(mono,color="#C0392B",ls="--",lw=1.6,label=f"CXR en solitario ({mono:.3f})")
 for i,v in enumerate(vv): ax.text(v+0.002,i,f"{v:.3f}".replace(".",","),va="center",fontsize=8)
-ax.set_xlim(0.53,0.62); ax.set_xlabel("AUC-PR macro (test)")
-ax.set_title("Comparativa de fusores (naranja = el mejor por validación · azul medio = el más interpretable)",color=BLUE,fontsize=10)
+i_final=names.index(interp)
+ax.annotate("MODELO FINAL\n(elegido por interpretabilidad,\nno por ser el mejor en test)",
+            xy=(vv[i_final],i_final), xytext=(0.606,i_final+1.7),
+            fontsize=8, color="#1F3864", fontweight="bold", ha="left",
+            arrowprops=dict(arrowstyle="->",color="#1F3864",lw=1.3))
+ax.set_xlim(0.53,0.63); ax.set_xlabel("AUC-PR macro (test)")
+ax.set_title("Comparativa de fusores (naranja = el mejor EN VALIDACIÓN, no necesariamente en test · azul claro = modelo final)",color=BLUE,fontsize=9.5)
 ax.legend(loc="lower right",fontsize=8.5); ax.grid(axis="x",alpha=.25)
 fig.tight_layout(); fig.savefig(f"{FIG}/22_fusores_comparativa.png",bbox_inches="tight"); plt.close(fig)
 
@@ -187,13 +197,26 @@ for a in (e1,e2): a.set_xlim(0,1); a.set_ylim(0,1.02); a.grid(alpha=.25)
 figE.suptitle("ECG v2 — rendimiento por patología (test)",color=BLUE,fontweight="bold")
 figE.tight_layout(rect=[0,0,1,0.96]); figE.savefig(f"{FIG}/06_ecg_v2_curvas.png",bbox_inches="tight"); plt.close(figE)
 # barras AUC-PR / AUC-ROC + prevalencia
-mE=pd.read_csv("salidas/02_ecg/v2/metrics_per_label_v2.csv"); labsE=[ES.get(l,l) for l in mE["label"]]; yE=np.arange(len(labsE))
+mE=nf_last(pd.read_csv("salidas/02_ecg/v2/metrics_per_label_v2.csv")); labsE=[ES.get(l,l) for l in mE["label"]]; yE=np.arange(len(labsE))
 figB,ax=plt.subplots(figsize=(8.2,4.2))
 ax.barh(yE-0.2,mE["AP"],0.4,color=BLUE,label="AUC-PR"); ax.barh(yE+0.2,mE["AUC"],0.4,color=BLUE2,label="AUC-ROC")
-for i,pv in enumerate(mE["prevalencia"]): ax.plot([pv,pv],[i-0.4,i+0.4],color=ORANGE,lw=2.4,label=("Prevalencia (línea base AUC-PR)" if i==0 else None))
+for i,pv in enumerate(mE["prevalencia"]): ax.plot([pv,pv],[i-0.4,i],color=ORANGE,lw=2.6,label=("Prevalencia (línea base solo de la AUC-PR)" if i==0 else None))
 ax.set_yticks(yE); ax.set_yticklabels(labsE); ax.invert_yaxis(); ax.set_xlim(0,1); ax.set_xlabel("Valor"); ax.legend(loc="lower right",fontsize=8)
-ax.set_title("ECG v2 — AUC-PR y AUC-ROC por patología (naranja = prevalencia)"); ax.grid(axis="x",alpha=.25)
+ax.set_title("ECG v2 — AUC-PR y AUC-ROC por patología (naranja = prevalencia, línea base solo de la AUC-PR)"); ax.grid(axis="x",alpha=.25)
 figB.tight_layout(); figB.savefig(f"{FIG}/05_ecg_v2_auc_etiqueta.png",bbox_inches="tight"); plt.close(figB)
+
+# ── barras AUC-PR / AUC-ROC + prevalencia (LABS v1, la versión que entra en la fusión) ──
+try:
+    mL=nf_last(pd.read_csv("salidas/03_labs/v1/metrics_per_label_v1.csv")); labsL=[ES.get(l,l) for l in mL["label"]]; yL=np.arange(len(labsL))
+    figL,ax=plt.subplots(figsize=(8.2,4.2))
+    ax.barh(yL-0.2,mL["AP"],0.4,color=BLUE,label="AUC-PR"); ax.barh(yL+0.2,mL["AUC"],0.4,color=BLUE2,label="AUC-ROC")
+    for i,pv in enumerate(mL["prevalencia"]): ax.plot([pv,pv],[i-0.4,i],color=ORANGE,lw=2.6,label=("Prevalencia (línea base solo de la AUC-PR)" if i==0 else None))
+    ax.set_yticks(yL); ax.set_yticklabels(labsL); ax.invert_yaxis(); ax.set_xlim(0,1); ax.set_xlabel("Valor"); ax.legend(loc="lower right",fontsize=8)
+    ax.set_title("Analíticas v1 — AUC-PR y AUC-ROC por patología (naranja = prevalencia, línea base solo de la AUC-PR)"); ax.grid(axis="x",alpha=.25)
+    figL.tight_layout(); figL.savefig(f"{FIG}/20_labs_v1_auc_etiqueta.png",bbox_inches="tight"); plt.close(figL)
+    print("   + 20_labs_v1_auc_etiqueta.png")
+except Exception as e:
+    print("   ! labs bar fig omitida:",e)
 
 # ══════ Fiabilidad LIMPIA (CXR v2 y ECG v2), agrupando las 5 patologías ══════
 def reliab(Pmat,Ymat,Mmat,titulo,fname):
@@ -224,14 +247,13 @@ def loadbp(sp):
     for j,lab in enumerate(LAB): w=Wv[lab]; Pf[:,j]=w[0]*Pm["CXR"][:,j]+w[1]*Pm["ECG"][:,j]+w[2]*Pm["LABS"][:,j]
     return (raw==1).astype(int),(raw!=-1),Pf
 Yv,Mv,Pfv=loadbp("val"); Yt2,Mt2,Pft=loadbp("test")
-grid=np.round(np.arange(0.05,0.9,0.01),2)
+# Umbrales de CRIBADO fijados en validación (idénticos a la Tabla 7.6 de la memoria
+# y al modo "cribado" de la herramienta): min{umbral : Se(val) >= 0.90 aprox.}
+THR_CRIBADO={"Atelectasis":0.24,"Cardiomegaly":0.30,"Edema":0.15,
+             "Lung Opacity":0.25,"No Finding":0.08,"Pleural Effusion":0.28}
 figC,axes=plt.subplots(2,3,figsize=(9.5,6))
 for j,lab in enumerate(LAB):
-    sv=Mv[:,j]==1; bestf1,thr=-1,0.5
-    for th in grid:
-        pr=(Pfv[sv,j]>=th).astype(int); tp=((pr==1)&(Yv[sv,j]==1)).sum(); fp=((pr==1)&(Yv[sv,j]==0)).sum(); fn=((pr==0)&(Yv[sv,j]==1)).sum()
-        se=tp/max(tp+fn,1); pp=tp/max(tp+fp,1); f1=2*pp*se/max(pp+se,1e-9)
-        if f1>bestf1: bestf1,thr=f1,th
+    thr=THR_CRIBADO[lab]
     st=Mt2[:,j]==1; pred=(Pft[st,j]>=thr).astype(int); yt=Yt2[st,j]
     TN=int(((pred==0)&(yt==0)).sum());FP=int(((pred==1)&(yt==0)).sum());FN=int(((pred==0)&(yt==1)).sum());TP=int(((pred==1)&(yt==1)).sum())
     cm=np.array([[TN,FP],[FN,TP]]); ax=axes[j//3,j%3]; ax.imshow(cm,cmap="Blues")
@@ -239,7 +261,7 @@ for j,lab in enumerate(LAB):
     for a in range(2):
         for bcol in range(2): ax.text(bcol,a,cm[a,bcol],ha="center",va="center",fontsize=11,color="white" if cm[a,bcol]>cm.max()*0.6 else "black")
     ax.set_xticks([0,1]);ax.set_xticklabels(["Pred. sano","Pred. enfermo"],fontsize=7);ax.set_yticks([0,1]);ax.set_yticklabels(["Real sano","Real enfermo"],fontsize=7)
-figC.suptitle("Modelo final (fusión v3) — matrices de confusión por patología (punto F1)",color=BLUE,fontweight="bold")
+figC.suptitle("Modelo final (fusión v3) — matrices de confusión por patología (modo CRIBADO)",color=BLUE,fontweight="bold")
 figC.tight_layout(rect=[0,0,1,0.96]); figC.savefig(f"{FIG}/27_fusion_v3_confusion.png",bbox_inches="tight"); plt.close(figC)
 
 print("OK · regeneradas ECG v2 (05,06,08), fiabilidad CXR/ECG (04,08), y matrices confusión fusión v3 (27)")

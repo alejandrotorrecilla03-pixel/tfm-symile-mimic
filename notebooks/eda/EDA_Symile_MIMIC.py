@@ -43,7 +43,7 @@ FIGD.mkdir(parents=True, exist_ok=True); TABD.mkdir(parents=True, exist_ok=True)
 INK, ACCENT, GRID, SUB = "#1F2A44", "#2E5496", "#D9DEE8", "#5A6678"
 sns.set_theme(style="white")
 mpl.rcParams.update({
-    "figure.dpi":120,"savefig.dpi":160,"savefig.bbox":"tight","font.family":"DejaVu Sans","font.size":12,
+    "figure.dpi":120,"savefig.dpi":160,"savefig.bbox":"tight","font.family":"Cambria","font.size":12,
     "axes.titlesize":15,"axes.titleweight":"bold","axes.titlecolor":INK,"axes.labelsize":12,"axes.labelcolor":INK,
     "axes.edgecolor":"#7A8499","axes.linewidth":1.0,"xtick.color":INK,"ytick.color":INK,"text.color":INK,
     "legend.fontsize":10,"legend.frameon":True,"legend.edgecolor":GRID,"legend.framealpha":0.95,
@@ -51,9 +51,10 @@ mpl.rcParams.update({
 LABELS=["Atelectasis","Cardiomegaly","Edema","Lung Opacity","No Finding","Pleural Effusion"]
 ES={"Atelectasis":"Atelectasia","Cardiomegaly":"Cardiomegalia","Edema":"Edema","Lung Opacity":"Opacidad pulmonar","No Finding":"Sin hallazgo","Pleural Effusion":"Derrame pleural"}
 PATHO=[l for l in LABELS if l!="No Finding"]; NF=LABELS.index("No Finding"); PC=[j for j in range(6) if j!=NF]
-LCOL={"Atelectasis":"#4C72B0","Cardiomegaly":"#DD8452","Edema":"#55A868","Lung Opacity":"#C44E52","No Finding":"#8C8C8C","Pleural Effusion":"#937DB8"}
-SCOL={"train":"#2E5496","val":"#E1812C","test":"#3A923A"}; SES={"train":"Entrenamiento","val":"Validación","test":"Test"}
-POSC,NEGC="#2E5496","#C44E52"; GENDER={0:0,1:1,"0":0,"1":1,"M":1,"F":0}; XS=np.arange(6)
+# Paleta USAL unificada (coherente con el informe de modelos: marino + naranja institucionales)
+LCOL={"Atelectasis":"#1F3864","Cardiomegaly":"#2E5496","Edema":"#5B8FCB","Lung Opacity":"#C55A11","No Finding":"#7F7F7F","Pleural Effusion":"#2E8B57"}
+SCOL={"train":"#1F3864","val":"#C55A11","test":"#2E8B57"}; SES={"train":"Entrenamiento","val":"Validación","test":"Test"}
+POSC,NEGC="#2E5496","#C55A11"; GENDER={0:0,1:1,"0":0,"1":1,"M":1,"F":0}; XS=np.arange(6)
 
 def style(ax,title=None,sub=None,xlabel=None,ylabel=None,grid=True):
     if title: ax.set_title(title,pad=16 if sub else 10)
@@ -114,13 +115,13 @@ style(ax,"QQ-plot de la edad (entrenamiento)","Apartamiento moderado de la norma
 g=train["gender"].map(lambda v:GENDER.get(v,0)); a_m=train["age"][g==1].dropna(); a_f=train["age"][g==0].dropna()
 Umw,pMW=stats.mannwhitneyu(a_m,a_f)
 fig,ax=plt.subplots(figsize=(6.4,4.8)); parts=ax.violinplot([a_m,a_f],showmedians=True)
-for pc,c in zip(parts["bodies"],[ACCENT,"#E1812C"]): pc.set_facecolor(c); pc.set_alpha(0.6)
+for pc,c in zip(parts["bodies"],[ACCENT,"#C55A11"]): pc.set_facecolor(c); pc.set_alpha(0.6)
 parts["cmedians"].set_color(INK); ax.set_xticks([1,2]); ax.set_xticklabels([f"Hombre\nn={len(a_m):,}",f"Mujer\nn={len(a_f):,}"])
 style(ax,"Edad por sexo","Mann-Whitney p<0,001 (mujeres ligeramente mayores)",ylabel="Edad (años)"); savefig(fig,"edad_genero")
 order=["WHITE","BLACK","UNKNOWN","HISPANIC_LATINO","ASIAN","OTHER_KNOWN"]; elab={"WHITE":"Blanca","BLACK":"Negra","UNKNOWN":"Desconocida","HISPANIC_LATINO":"Hispana","ASIAN":"Asiática","OTHER_KNOWN":"Otra"}
 data=[train["age"][train["race"]==o].dropna() for o in order]; Hkw,pKW=stats.kruskal(*[d for d in data if len(d)>5])
 fig,ax=plt.subplots(figsize=(9,4.8)); bp=ax.boxplot(data,patch_artist=True,medianprops={"color":INK,"lw":2},widths=0.6,showfliers=False)
-for box in bp["boxes"]: box.set_facecolor("#A9C0E0")
+for box in bp["boxes"]: box.set_facecolor("#9FBCE0")
 ax.set_xticklabels([elab[o] for o in order],rotation=20,ha="right"); style(ax,"Edad por grupo étnico",f"Kruskal-Wallis H={Hkw:.0f}, p<0,001",ylabel="Edad (años)"); savefig(fig,"edad_etnia")
 demo_rows=[]
 for s in ["train","val","test"]:
@@ -135,10 +136,10 @@ tests=pd.DataFrame([
 ])
 w=0.26
 fig,ax=plt.subplots(figsize=(6.6,5.6)); bins=np.arange(15,101,5); hmh,_=np.histogram(a_m,bins=bins); hfh,_=np.histogram(a_f,bins=bins); yc=(bins[:-1]+bins[1:])/2
-ax.barh(yc,-hmh,height=4,color=ACCENT,label="Hombre"); ax.barh(yc,hfh,height=4,color="#E1812C",label="Mujer")
+ax.barh(yc,-hmh,height=4,color=ACCENT,label="Hombre"); ax.barh(yc,hfh,height=4,color="#C55A11",label="Mujer")
 ax.set_xticks(ax.get_xticks()); ax.set_xticklabels([f"{abs(int(t))}" for t in ax.get_xticks()]); style(ax,"Pirámide de edad por sexo",xlabel="nº de pacientes",ylabel="Edad (años)"); ax.legend(); savefig(fig,"piramide_edad")
 fig,ax=plt.subplots(figsize=(7,4.2)); male=[(DF[s]["gender"].map(lambda v:GENDER.get(v,0))==1).mean()*100 for s in ["train","val","test"]]; fem=[100-mm for mm in male]
-ax.bar(range(3),male,0.6,label="Hombre",color=ACCENT,edgecolor="white"); ax.bar(range(3),fem,0.6,bottom=male,label="Mujer",color="#E1812C",edgecolor="white")
+ax.bar(range(3),male,0.6,label="Hombre",color=ACCENT,edgecolor="white"); ax.bar(range(3),fem,0.6,bottom=male,label="Mujer",color="#C55A11",edgecolor="white")
 for i,(mm,ff) in enumerate(zip(male,fem)): ax.text(i,mm/2,f"{mm:.0f}%",ha="center",color="white",fontweight="bold"); ax.text(i,mm+ff/2,f"{ff:.0f}%",ha="center",color="white",fontweight="bold")
 ax.set_xticks(range(3)); ax.set_xticklabels([SES[s] for s in ["train","val","test"]]); ax.set_yticks([]); ax.spines["left"].set_visible(False)
 style(ax,"Distribución por sexo y partición",ylabel=""); ax.legend(ncol=2,loc="lower center",bbox_to_anchor=(0.5,-0.22)); savefig(fig,"genero_split")
@@ -168,9 +169,9 @@ ax.axhline(50,color="#7A8499",ls="--",lw=1); xlabels(ax); style(ax,"Prevalencia 
 raw=train[LABELS].to_numpy(float); n=len(train)
 z0=[(raw[:,j]==0).mean()*100 for j in range(6)]; zm1=[(raw[:,j]==-1).mean()*100 for j in range(6)]; znan=[np.isnan(raw[:,j]).mean()*100 for j in range(6)]; zpos=[(raw[:,j]==1).mean()*100 for j in range(6)]
 fig,ax=plt.subplots(figsize=(9.5,5.0)); b0=np.array(zpos); b1=b0+np.array(z0); b2=b1+np.array(znan)
-ax.bar(XS,zpos,color="#55A868",label="Positivo (1)",edgecolor="white")
-ax.bar(XS,z0,bottom=b0,color="#7FA8D0",label="Negativo: 0 explícito",edgecolor="white")
-ax.bar(XS,znan,bottom=b1,color="#C0708A",label="Negativo: NaN → 0",edgecolor="white")
+ax.bar(XS,zpos,color="#2E8B57",label="Positivo (1)",edgecolor="white")
+ax.bar(XS,z0,bottom=b0,color="#5B8FCB",label="Negativo: 0 explícito",edgecolor="white")
+ax.bar(XS,znan,bottom=b1,color="#B5728E",label="Negativo: NaN → 0",edgecolor="white")
 ax.bar(XS,zm1,bottom=b2,color="#B0B0B0",label="Excluido: −1 (enmascarado)",edgecolor="white")
 xlabels(ax); ax.set_ylim(0,108); style(ax,"Composición de cada etiqueta (definición final)","Negativo = 0 + NaN→0; el −1 (incierto) se excluye de pérdida y métrica",ylabel="% de registros"); ax.legend(loc="lower center",bbox_to_anchor=(0.5,-0.34),ncol=2); savefig(fig,"composicion_negativo")
 def contraste(df):
@@ -186,7 +187,7 @@ def contraste(df):
 for s in ["train","val","test"]: savetab(contraste(DF[s]),f"contraste_negativo_{s}",index=False)
 ct=contraste(train); pos=ct["Positivos"].values; neg=ct["Neg_final(NaN->0,-1 excl)"].values
 fig,ax=plt.subplots(figsize=(9.5,4.8))
-ax.bar(XS-0.2,pos,0.4,label="Positivos",color="#55A868",edgecolor="white"); ax.bar(XS+0.2,neg,0.4,label="Negativos (0 + NaN→0)",color=ACCENT,edgecolor="white")
+ax.bar(XS-0.2,pos,0.4,label="Positivos",color="#2E8B57",edgecolor="white"); ax.bar(XS+0.2,neg,0.4,label="Negativos (0 + NaN→0)",color=ACCENT,edgecolor="white")
 for i in range(6): ax.text(i,max(pos[i],neg[i])+120,f"{neg[i]/max(pos[i],1):.1f}:1",ha="center",fontsize=9,fontweight="bold")
 xlabels(ax); style(ax,"Balance positivos vs negativos (−1 excluido)","Negativo = 0 + NaN→0; desbalanceo moderado (1,7:1–6,3:1), se resuelve con pos_weight",ylabel="nº de pacientes"); ax.legend(); savefig(fig,"balance_pos_neg")
 fig,ax=plt.subplots(figsize=(9,4.6)); pw=ct["pos_weight"].values
@@ -207,7 +208,7 @@ ax.set_xticklabels(ax.get_xticklabels(),rotation=30,ha="right"); style(ax,"Simil
 miss_pct=train[PCT].isna().mean().values; sidx=np.argsort(miss_raw)[::-1]
 missdf=pd.DataFrame({"Analítica":RAWD,"% ausente (train)":np.round(miss_raw*100,1)}).sort_values("% ausente (train)",ascending=False)
 fig,ax=plt.subplots(figsize=(11,5.2)); xb=np.arange(len(RAW))
-ax.bar(xb-0.2,miss_raw[sidx]*100,0.4,color=ACCENT,label="Raw"); ax.bar(xb+0.2,miss_pct[sidx]*100,0.4,color="#E1812C",label="Percentil")
+ax.bar(xb-0.2,miss_raw[sidx]*100,0.4,color=ACCENT,label="Raw"); ax.bar(xb+0.2,miss_pct[sidx]*100,0.4,color="#C55A11",label="Percentil")
 ax.axhline(70,color=NEGC,ls="--",lw=1.2,label="Umbral 70%"); ax.set_xticks(xb); ax.set_xticklabels([RAWD[i] for i in sidx],rotation=90,fontsize=7)
 style(ax,"Valores ausentes por analítica (raw vs percentil, train)","Ninguna supera el 70 %",ylabel="% ausente"); ax.legend(); savefig(fig,"missingness_raw_pct"); savetab(missdf,"missingness_analiticas",index=False)
 top6=np.argsort(miss_raw)[:6]
@@ -329,11 +330,11 @@ for l in PATHO:
 s=dom=="Sin patología"; ax.scatter(Z2[s,0],Z2[s,1],s=6,alpha=0.25,color="#B8B8B8",label="Sin patología",edgecolors="none")
 ax.legend(markerscale=2,fontsize=9); style(ax,"PCA de las analíticas — por patología dominante",f"PC1 {pca.explained_variance_ratio_[0]*100:.1f}% + PC2 {pca.explained_variance_ratio_[1]*100:.1f}%",xlabel="PC1",ylabel="PC2",grid=False); savefig(fig,"pca_etiqueta")
 fig,ax=plt.subplots(figsize=(7.4,6.2)); gg=train["gender"].map(lambda v:GENDER.get(v,0)).to_numpy()
-for val,lab,c in [(1,"Hombre",ACCENT),(0,"Mujer","#E1812C")]:
+for val,lab,c in [(1,"Hombre",ACCENT),(0,"Mujer","#C55A11")]:
     s=gg==val; ax.scatter(Z2[s,0],Z2[s,1],s=8,alpha=0.45,color=c,label=lab,edgecolors="none")
 ax.legend(markerscale=2); style(ax,"PCA de las analíticas — por sexo",xlabel="PC1",ylabel="PC2",grid=False); savefig(fig,"pca_sexo")
 fig,ax=plt.subplots(figsize=(8,4.6)); pf=PCA(min(30,len(RAW)),random_state=0).fit(Xs); ev=pf.explained_variance_ratio_*100; cum=np.cumsum(ev)
-ax.bar(range(1,len(ev)+1),ev,color=ACCENT,alpha=0.85,edgecolor="white"); ax2=ax.twinx(); ax2.plot(range(1,len(ev)+1),cum,color="#E1812C",marker="o",ms=4,lw=2); ax2.axhline(80,color=NEGC,ls="--",lw=1); ax2.set_ylabel("acumulada (%)"); ax2.grid(False)
+ax.bar(range(1,len(ev)+1),ev,color=ACCENT,alpha=0.85,edgecolor="white"); ax2=ax.twinx(); ax2.plot(range(1,len(ev)+1),cum,color="#C55A11",marker="o",ms=4,lw=2); ax2.axhline(80,color=NEGC,ls="--",lw=1); ax2.set_ylabel("acumulada (%)"); ax2.grid(False)
 ax.set_xlabel("componente principal"); ax.set_ylabel("varianza individual (%)"); style(ax,"Scree plot — varianza explicada por PCA","~19 componentes para el 80 %"); savefig(fig,"scree"); savetab(vardf,"pca_varianza",index=False)
 idx=np.random.RandomState(0).choice(len(Xs),min(3000,len(Xs)),replace=False); Zt=TSNE(2,perplexity=30,init="pca",random_state=0).fit_transform(Xs[idx])
 fig,ax=plt.subplots(figsize=(7.4,6.4))
@@ -357,7 +358,7 @@ fig,ax=plt.subplots(figsize=(8,4.6)); pm=[]; pf2=[]
 for l in LABELS:
     yb=(train[l]==1).astype(int); ph=(yb[gg==1]==1).mean()*100; pmf=(yb[gg==0]==1).mean()*100; pm.append(ph); pf2.append(pmf)
     genrows.append({"Hallazgo":ES[l],"% pos Hombre":round(ph,1),"% pos Mujer":round(pmf,1),"V de Cramer":round(cramers_v(gg,yb),3)})
-ax.bar(XS-0.19,pm,0.38,label="Hombre",color=ACCENT,edgecolor="white"); ax.bar(XS+0.19,pf2,0.38,label="Mujer",color="#E1812C",edgecolor="white")
+ax.bar(XS-0.19,pm,0.38,label="Hombre",color=ACCENT,edgecolor="white"); ax.bar(XS+0.19,pf2,0.38,label="Mujer",color="#C55A11",edgecolor="white")
 xlabels(ax); style(ax,"Prevalencia de positivos por sexo","Diferencias significativas pero V de Cramér ≤ 0,05",ylabel="% positivos"); ax.legend(); savefig(fig,"genero_etiqueta"); savetab(pd.DataFrame(genrows),"genero_etiqueta",index=False)
 etn_rows=[]
 fig,ax=plt.subplots(figsize=(10,4.8)); w2=0.13
